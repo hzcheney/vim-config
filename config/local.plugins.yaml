@@ -1,0 +1,8 @@
+
+- { repo: prabirshrestha/vim-lsp, if: 0 }
+
+- { repo: mattn/vim-lsp-settings, if: 0 }
+
+- repo: neoclide/coc.nvim
+
+- repo: rafi/awesome-vim-colorschemes
