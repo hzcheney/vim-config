@@ -31,11 +31,10 @@ let s:original_width = g:fern#drawer_width
 
 nnoremap <Plug>(fern-close-drawer) :<C-u>FernDo close -drawer -stay<CR>
 
-highlight! FernCursorLine ctermbg=236 guibg=#323232
-
 function! s:init_fern()
-	autocmd BufEnter <buffer> highlight! link CursorLine FernCursorLine
-	autocmd BufLeave <buffer> highlight! link CursorLine NONE
+	if has('nvim')
+		setlocal winhighlight=CursorLine:UserSelectionBackground
+	end
 
 	silent! nnoremap <buffer> f <Nop>
 	silent! nnoremap <buffer> F <Nop>
@@ -77,7 +76,6 @@ function! s:init_fern()
 	nmap <buffer><silent> P      <Plug>(fern-action-clipboard-paste)
 	nmap <buffer><silent> h      <Plug>(fern-action-collapse)
 	nmap <buffer><silent> c      <Plug>(fern-action-copy)
-	nmap <buffer><silent> fe     <Plug>(fern-action-exclude)
 	nmap <buffer><silent> <<     <Plug>(fern-action-git-stage)
 	nmap <buffer><silent> >>     <Plug>(fern-action-git-unstage)
 
@@ -85,9 +83,10 @@ function! s:init_fern()
 	nmap <buffer><silent> !      <Plug>(fern-action-hidden)
 	nmap <buffer><silent> I      <Plug>(fern-action-hide-toggle)
 	nmap <buffer><silent> fi     <Plug>(fern-action-include)
+	nmap <buffer><silent> fe     <Plug>(fern-action-exclude)
 	nmap <buffer><silent> <BS>   <Plug>(fern-action-leave)
 	nmap <buffer><silent> m      <Plug>(fern-action-move)
-	nmap <buffer><silent> K      <Plug>(fern-action-new-dir)
+	nmap <buffer><silent> <C-n>  <Plug>(fern-action-new-dir)
 	" nmap <buffer><silent>        <Plug>(fern-action-new-file)
 	nmap <buffer><silent> N      <Plug>(fern-action-new-path)
 	nmap <buffer><silent> e      <Plug>(fern-action-open)
@@ -103,12 +102,17 @@ function! s:init_fern()
 	nmap <buffer><silent> <C-r>  <Plug>(fern-action-reload)
 	nmap <buffer><silent> R      <Plug>(fern-action-rename)
 	nmap <buffer><silent> .      <Plug>(fern-action-repeat)
-	nmap <buffer><silent> i      <Plug>(fern-action-reveal)
+	" nmap <buffer><silent>        <Plug>(fern-action-reveal)
 	nmap <buffer><silent> B      <Plug>(fern-action-save-as-bookmark)
 	nmap <buffer><silent> D      <Plug>(fern-action-trash)
 	nmap <buffer><silent> yy     <Plug>(fern-action-yank)
 	nmap <buffer><silent> w
 		\ :<C-u>call fern#helper#call(funcref('<SID>toggle_width'))<CR>
+
+	nmap <silent> <buffer> p     <Plug>(fern-action-preview:toggle)
+	nmap <silent> <buffer> <C-p> <Plug>(fern-action-preview:auto:toggle)
+	nmap <silent> <buffer> <C-f> <Plug>(fern-action-preview:scroll:down:half)
+	nmap <silent> <buffer> <C-b> <Plug>(fern-action-preview:scroll:up:half)
 
 	" Selection
 	nmap <buffer><silent> u <Plug>(fern-action-mark:clear)
@@ -117,27 +121,23 @@ function! s:init_fern()
 	nmap <buffer><silent><nowait> <Space> <Plug>(fern-action-mark)j
 
 	" Grep inside
-	nnoremap <buffer><silent>
-		\ <Plug>(fern-user-grep)
-		\ :<C-u>call fern#helper#call(funcref('<SID>grep'))<CR>
+	nnoremap <buffer> <Plug>(fern-user-grep)
+		\ <cmd>call fern#helper#call(funcref('<SID>grep'))<CR>
 	nmap <buffer><silent> gr <Plug>(fern-user-grep)
 
 	" Find files inside
-	nnoremap <buffer><silent>
-		\ <Plug>(fern-user-find)
-		\ :<C-u>call fern#helper#call(funcref('<SID>find'))<CR>
+	nnoremap <buffer> <Plug>(fern-user-find)
+		\ <cmd>call fern#helper#call(funcref('<SID>find'))<CR>
 	nmap <buffer><silent> gf <Plug>(fern-user-find)
 
 	" Find and enter project root
-	nnoremap <buffer><silent>
-		\ <Plug>(fern-user-enter-project-root)
-		\ :<C-u>call fern#helper#call(funcref('<SID>enter_project_root'))<CR>
+	nnoremap <buffer> <Plug>(fern-user-enter-project-root)
+		\ <cmd>call fern#helper#call(funcref('<SID>enter_project_root'))<CR>
 	nmap <buffer><expr><silent> ^
 		\ fern#smart#scheme("^", {'file': "\<Plug>(fern-user-enter-project-root)"})
 
 	" Open bookmark
-	nnoremap <buffer><silent> <Plug>(fern-my-enter-bookmark)
-		\ :<C-u>Fern bookmark:///<CR>
+	nnoremap <buffer> <Plug>(fern-my-enter-bookmark) <cmd>Fern bookmark:///<CR>
 	nmap <buffer><expr><silent> o
 		\ fern#smart#scheme(
 		\   "\<Plug>(fern-my-enter-bookmark)",
@@ -147,6 +147,8 @@ endfunction
 augroup fern-custom
 	autocmd! *
 	autocmd FileType fern call s:init_fern()
+	" autocmd DirChanged * ++nested
+	"	\ execute printf('FernDo Fern %s -drawer -stay -drawer -stay', v:event.cwd)
 augroup END
 
 function! s:get_selected_nodes(helper) abort
@@ -154,23 +156,33 @@ function! s:get_selected_nodes(helper) abort
 	return empty(nodes) ? [a:helper.sync.get_cursor_node()] : nodes
 endfunction
 
-function! s:get_selected_paths(helper) abort
-	let l:nodes = s:get_selected_nodes(a:helper)
-	return map(l:nodes, {_, val ->
-		\ val.status == g:fern#STATUS_NONE || val.status == g:fern#STATUS_COLLAPSED
-		\ ? fnamemodify(val._path, ':h') : val._path})
+function! s:get_cursor_path(helper) abort
+	let l:node = a:helper.sync.get_cursor_node()
+	let l:path = l:node._path
+	if index([g:fern#STATUS_NONE, g:fern#STATUS_COLLAPSED], l:node.status) >= 0
+		let l:path = fnamemodify(l:path, ':h')
+	endif
+	return l:path
 endfunction
 
 function! s:find(helper) abort
-	let l:paths = s:get_selected_paths(a:helper)
+	let l:path = s:get_cursor_path(a:helper)
 	silent execute 'wincmd w'
-	call denite#start([{'name': 'file/rec', 'args': l:paths}])
+	if exists(':Telescope')
+		execute 'Telescope find_files cwd=' . fnameescape(l:path)
+	elseif exists(':Denite')
+		call denite#start([{'name': 'file/rec', 'args': [l:path]}])
+	endif
 endfunction
 
 function! s:grep(helper) abort
-	let l:paths = s:get_selected_paths(a:helper)
+	let l:path = s:get_cursor_path(a:helper)
 	silent execute 'wincmd w'
-	call denite#start([{'name': 'grep', 'args': l:paths}])
+	if exists(':Telescope')
+		execute 'Telescope live_grep cwd=' . fnameescape(l:path)
+	else
+		call denite#start([{'name': 'grep', 'args': [l:path]}])
+	endif
 endfunction
 
 function! s:enter_project_root(helper) abort
